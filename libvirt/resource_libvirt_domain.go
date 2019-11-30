@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
 	libvirt "github.com/libvirt/libvirt-go"
 	libvirtxml "github.com/libvirt/libvirt-go-xml"
@@ -14,6 +13,7 @@ func resourceLibvirtDomain() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceLibvirtDomainCreate,
 		Read:   resourceLibvirtDomainRead,
+		Update: resourceLibvirtDomainUpdate,
 		Delete: resourceLibvirtDomainDelete,
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(2 * time.Minute),
@@ -23,20 +23,17 @@ func resourceLibvirtDomain() *schema.Resource {
 			"xml": {
 				Type:     schema.TypeString,
 				Required: true,
-				ForceNew: true,
-				ValidateFunc: func(v interface{}, k string) (ws []string, es []error) {
-					_, err := parseXML(v.(string))
-					if err != nil {
-						es = append(es, fmt.Errorf("Failed to unmarshal input: %s", err))
-					}
-					return ws, es
-				},
 				StateFunc: func(v interface{}) (state string) {
-					state, err := parseXML(v.(string))
+					schema := libvirtxml.Domain{}
+					err := schema.Unmarshal(v.(string))
 					if err != nil {
-						state = ""
+						return ""
 					}
-					return state
+					newXML, err := schema.Marshal()
+					if err != nil {
+						return ""
+					}
+					return newXML
 				},
 			},
 		},
@@ -52,16 +49,37 @@ func resourceLibvirtDomainCreate(d *schema.ResourceData, meta interface{}) error
 	}
 	defer domain.Free()
 
-	err = domain.Create()
-	if err != nil {
-		return fmt.Errorf("Failed to create domain: %s", err)
-	}
-
 	uuid, err := domain.GetUUIDString()
 	if err != nil {
 		return fmt.Errorf("Failed to get UUID from domain: %s", err)
 	}
 	d.SetId(uuid)
+	return nil
+}
+
+func resourceLibvirtDomainUpdate(d *schema.ResourceData, meta interface{}) error {
+	if d.HasChange("xml") {
+		virConn := meta.(*libvirt.Connect)
+
+		// Try redefining the domain with new XML
+		// The input XML will need to be modified to contain the current UUID
+		// Otherwise it will fail with domain already exists
+		schema := libvirtxml.Domain{}
+		err := schema.Unmarshal(d.Get("xml").(string))
+		if err != nil {
+			return fmt.Errorf("Failed to unmarshal XML: %s", err)
+		}
+		schema.UUID =  d.Id()
+		newXML, err := schema.Marshal()
+		if err != nil {
+			return fmt.Errorf("Failed to marshal XML: %s", err)
+		}
+		domain, err := virConn.DomainDefineXML(newXML)
+		if err != nil {
+			return fmt.Errorf("Failed to redefine domain: %s", err)
+		}
+		defer domain.Free()
+	}
 	return nil
 }
 
@@ -77,37 +95,6 @@ func resourceLibvirtDomainDelete(d *schema.ResourceData, meta interface{}) error
 	}
 	defer domain.Free()
 
-	if err := domain.ShutdownFlags(0); err != nil {
-		if err.(libvirt.Error).Code != libvirt.ERR_OPERATION_INVALID {
-			return fmt.Errorf("Failed to shut down domain: %s", err)
-		}
-	}
-
-	shutdownStateConf := &resource.StateChangeConf{
-		Refresh: func() (interface{}, string, error) {
-			state, _, err := domain.GetState()
-			if err != nil {
-				return 0, "", err
-			}
-			return state, fmt.Sprintf("%d", state), nil
-		},
-		Pending: []string{
-			fmt.Sprintf("%d", libvirt.DOMAIN_SHUTDOWN),
-		},
-		Target: []string{
-			fmt.Sprintf("%d", libvirt.DOMAIN_SHUTOFF),
-		},
-		Timeout:    90 * time.Second,
-		MinTimeout: 1 * time.Second,
-		Delay:      1 * time.Second,
-	}
-
-	_, err = shutdownStateConf.WaitForState()
-	if err != nil {
-		if err := domain.DestroyFlags(libvirt.DOMAIN_DESTROY_GRACEFUL); err != nil {
-			return fmt.Errorf("Failed destroy domain: %s", err)
-		}
-	}
 	if err := domain.UndefineFlags(libvirt.DOMAIN_UNDEFINE_MANAGED_SAVE |
 		libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA |
 		libvirt.DOMAIN_UNDEFINE_NVRAM |
@@ -126,17 +113,4 @@ func resourceLibvirtDomainRead(d *schema.ResourceData, meta interface{}) error {
 	}
 	defer domain.Free()
 	return nil
-}
-
-func parseXML(inputXML string) (string, error) {
-	schema := libvirtxml.Domain{}
-	err := schema.Unmarshal(inputXML)
-	if err != nil {
-		return "", err
-	}
-	newXML, err := schema.Marshal()
-	if err != nil {
-		return "", err
-	}
-	return newXML, nil
 }
