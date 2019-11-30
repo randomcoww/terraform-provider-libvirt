@@ -21,8 +21,8 @@ func resourceLibvirtDomain() *schema.Resource {
 		},
 		Schema: map[string]*schema.Schema{
 			"xml": {
-				Type:         schema.TypeString,
-				Required:     true,
+				Type:     schema.TypeString,
+				Required: true,
 				ForceNew: true,
 				ValidateFunc: func(v interface{}, k string) (ws []string, es []error) {
 					_, err := parseXML(v.(string))
@@ -108,11 +108,10 @@ func resourceLibvirtDomainDelete(d *schema.ResourceData, meta interface{}) error
 			return fmt.Errorf("Failed destroy domain: %s", err)
 		}
 	}
-	if err := domain.UndefineFlags(
-			libvirt.DOMAIN_UNDEFINE_MANAGED_SAVE | 
-			libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA | 
-			libvirt.DOMAIN_UNDEFINE_NVRAM | 
-			libvirt.DOMAIN_UNDEFINE_CHECKPOINTS_METADATA); err != nil {
+	if err := domain.UndefineFlags(libvirt.DOMAIN_UNDEFINE_MANAGED_SAVE |
+		libvirt.DOMAIN_UNDEFINE_SNAPSHOTS_METADATA |
+		libvirt.DOMAIN_UNDEFINE_NVRAM |
+		libvirt.DOMAIN_UNDEFINE_CHECKPOINTS_METADATA); err != nil {
 		return fmt.Errorf("Failed to undefine domain: %s", err)
 	}
 	return nil
