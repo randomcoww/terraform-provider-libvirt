@@ -14,6 +14,7 @@ func resourceLibvirtDomain() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceLibvirtDomainCreate,
 		Read:   resourceLibvirtDomainRead,
+		Update: resourceLibvirtDomainUpdate,
 		Delete: resourceLibvirtDomainDelete,
 		Exists: resourceLibvirtDomainExists,
 		Importer: &schema.ResourceImporter{
@@ -22,6 +23,7 @@ func resourceLibvirtDomain() *schema.Resource {
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(2 * time.Minute),
 			Delete: schema.DefaultTimeout(4 * time.Minute),
+			Update: schema.DefaultTimeout(4 * time.Minute),
 		},
 		Schema: map[string]*schema.Schema{
 			"xml": {
@@ -32,7 +34,6 @@ func resourceLibvirtDomain() *schema.Resource {
 			"domain": {
 				Type:     schema.TypeString,
 				Computed: true,
-				ForceNew: true,
 			},
 		},
 	}
@@ -50,13 +51,18 @@ func validateXML(v interface{}, k string) (ws []string, es []error) {
 func resourceLibvirtDomainCreate(d *schema.ResourceData, meta interface{}) error {
 	virConn := meta.(*libvirt.Connect)
 
-	domain, err := virConn.DomainCreateXML(d.Get("xml").(string), 24)
+	domain, err := virConn.DomainDefineXML(d.Get("xml").(string))
 	if err != nil {
-		return fmt.Errorf("Failed to create domain: %s", err)
+		return fmt.Errorf("Failed to define domain: %s", err)
 	}
 	defer domain.Free()
 
-	resultXML, err := domain.GetXMLDesc(8)
+	err = domain.Create()
+	if err != nil {
+		return fmt.Errorf("Failed to create domain: %s", err)
+	}
+
+	resultXML, err := domain.GetXMLDesc(libvirt.DOMAIN_XML_INACTIVE)
 	if err != nil {
 		return fmt.Errorf("Failed to get XML from domain: %s", err)
 	}
@@ -97,11 +103,20 @@ func resourceLibvirtDomainUpdate(d *schema.ResourceData, meta interface{}) error
 		}
 		defer domain.Free()
 
-		resultXML, err := domain.GetXMLDesc(8)
+		resultXML, err := domain.GetXMLDesc(libvirt.DOMAIN_XML_INACTIVE)
 		if err != nil {
 			return fmt.Errorf("Failed to get XML from domain: %s", err)
 		}
-		d.Set("domain", resultXML)
+
+		if resultXML != d.Get("domain").(string) {
+			d.Set("domain", resultXML)
+			if err = resourceLibvirtDomainDelete(d, meta); err != nil {
+				return err
+			}
+			if err = resourceLibvirtDomainCreate(d, meta); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -119,7 +134,9 @@ func resourceLibvirtDomainDelete(d *schema.ResourceData, meta interface{}) error
 	defer domain.Free()
 
 	if err := domain.ShutdownFlags(0); err != nil {
-		return fmt.Errorf("Failed to shut down domain: %s", err)
+		if err.(libvirt.Error).Code != 55 {
+			return fmt.Errorf("Failed to shut down domain: %s", err)
+		}
 	}
 
 	shutdownStateConf := &resource.StateChangeConf{
@@ -161,7 +178,7 @@ func resourceLibvirtDomainRead(d *schema.ResourceData, meta interface{}) error {
 	}
 	defer domain.Free()
 
-	resultXML, err := domain.GetXMLDesc(8)
+	resultXML, err := domain.GetXMLDesc(libvirt.DOMAIN_XML_INACTIVE)
 	if err != nil {
 		return fmt.Errorf("Failed to get XML from domain: %s", err)
 	}
