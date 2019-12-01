@@ -1,3 +1,4 @@
 Simpler version of https://github.com/dmacvicar/terraform-provider-libvirt.
 
-It takes raw XML as input for creating libvirt domains. Only domains are supported.
+* Takes libvirt XML as input.
+* Define and undefine domains only - guests will not be started or stopped.
