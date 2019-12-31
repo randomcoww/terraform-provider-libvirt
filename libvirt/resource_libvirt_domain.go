@@ -109,7 +109,7 @@ func resourceLibvirtDomainRead(d *schema.ResourceData, meta interface{}) error {
 
 	domain, err := virConn.LookupDomainByUUIDString(d.Id())
 	if err != nil {
-		return fmt.Errorf("Failed to get domain: %s", err)
+		return nil
 	}
 	defer domain.Free()
 	return nil
