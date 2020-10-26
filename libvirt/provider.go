@@ -1,9 +1,12 @@
 package libvirt
 
 import (
+	"io"
+	"io/ioutil"
 	"fmt"
 	"os"
 	"path"
+
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 	libvirt "github.com/libvirt/libvirt-go"
@@ -42,7 +45,10 @@ func Provider() terraform.ResourceProvider {
 }
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
-	tempDir := os.TempDir()
+	tempDir, err := ioutil.TempDir("", "libvirtpki-")
+	if err != nil {
+		return nil, err
+	}
 	defer os.RemoveAll(tempDir)
 	if err := writeFile(path.Join(tempDir, "libvirt", "clientcert.pem"), d.Get("client_cert").(string)); err != nil {
 		return nil, err
@@ -61,19 +67,21 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 }
 
 func writeFile(filePath, content string) error {
-	base := path.Base(filePath)
-	err := os.MkdirAll(base, 0755)
+	f, err := os.Open(filePath)
 	if err != nil {
-		return err
-	}
-	f, err := os.Create(filePath)
-	if err != nil {
-		return err
+		err = os.MkdirAll(path.Base(filePath), 0755)
+		if err != nil {
+			return err
+		}
+		f, err = os.Create(filePath)
+		if err != nil {
+			return err
+		}
 	}
 	defer f.Close()
-	_, err = f.WriteString(content)
+	_, err = io.WriteString(f, content)
 	if err != nil {
-		return err
+			return err
 	}
-	return nil
+	return f.Sync()
 }
