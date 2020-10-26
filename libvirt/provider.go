@@ -1,9 +1,11 @@
 package libvirt
 
 import (
+	"io/ioutil"
 	"fmt"
 	"os"
 	"path"
+
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 	libvirt "github.com/libvirt/libvirt-go"
@@ -42,8 +44,11 @@ func Provider() terraform.ResourceProvider {
 }
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
-	tempDir := os.TempDir()
-	defer os.RemoveAll(tempDir)
+	tempDir, err := ioutil.TempDir("", "libvirt-pki")
+	if err != nil {
+		return nil, err
+	}
+	// defer os.RemoveAll(tempDir)
 	if err := writeFile(path.Join(tempDir, "libvirt", "clientcert.pem"), d.Get("client_cert").(string)); err != nil {
 		return nil, err
 	}
