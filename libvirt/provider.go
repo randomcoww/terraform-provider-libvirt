@@ -1,6 +1,9 @@
 package libvirt
 
 import (
+	"fmt"
+	"os"
+	"path"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 	libvirt "github.com/libvirt/libvirt-go"
@@ -9,11 +12,25 @@ import (
 func Provider() terraform.ResourceProvider {
 	return &schema.Provider{
 		Schema: map[string]*schema.Schema{
-			"uri": {
+			"endpoint": {
 				Type:        schema.TypeString,
 				Required:    true,
-				DefaultFunc: schema.EnvDefaultFunc("LIBVIRT_DEFAULT_URI", nil),
-				Description: "libvirt connection URI for operations. See https://libvirt.org/uri.html",
+				Description: "libvirt connection endpoint for operations. See https://libvirt.org/uri.html",
+			},
+			"client_cert": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "client cert TLS",
+			},
+			"client_key": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "client key TLS",
+			},
+			"ca": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "client CA TLS",
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
@@ -25,9 +42,38 @@ func Provider() terraform.ResourceProvider {
 }
 
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
-	client, err := libvirt.NewConnect(d.Get("uri").(string))
+	tempDir := os.TempDir()
+	defer os.RemoveAll(tempDir)
+	if err := writeFile(path.Join(tempDir, "libvirt", "clientcert.pem"), d.Get("client_cert").(string)); err != nil {
+		return nil, err
+	}
+	if err := writeFile(path.Join(tempDir, "libvirt", "private", "clientkey.pem"), d.Get("client_key").(string)); err != nil {
+		return nil, err
+	}
+	if err := writeFile(path.Join(tempDir, "cacert.pem"), d.Get("ca").(string)); err != nil {
+		return nil, err
+	}
+	uri, err := libvirt.NewConnect(fmt.Sprintf("%s?pkipath=%s", d.Get("endpoint").(string), tempDir))
 	if err != nil {
 		return nil, err
 	}
-	return client, nil
+	return uri, nil
+}
+
+func writeFile(filePath, content string) error {
+	base := path.Base(filePath)
+	err := os.MkdirAll(base, 0755)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(content)
+	if err != nil {
+		return err
+	}
+	return nil
 }
