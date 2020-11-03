@@ -25,8 +25,7 @@ func resourceLibvirtNetwork() *schema.Resource {
 				Required: true,
 				StateFunc: func(v interface{}) (state string) {
 					schema := libvirtxml.Network{}
-					err := schema.Unmarshal(v.(string))
-					if err != nil {
+					if err := schema.Unmarshal(v.(string)); err != nil {
 						return ""
 					}
 					newXML, err := schema.Marshal()
@@ -54,6 +53,17 @@ func resourceLibvirtNetworkCreate(d *schema.ResourceData, meta interface{}) erro
 		return fmt.Errorf("Failed to get UUID from network: %s", err)
 	}
 	d.SetId(uuid)
+
+	ok, err := network.IsActive()
+	if err != nil {
+		return fmt.Errorf("Failed to check network status: %s", err)
+	}
+	if !ok {
+		if err := network.Create(); err != nil {
+			return fmt.Errorf("Failed to start network: %s", err)
+		}
+	}
+
 	return nil
 }
 
@@ -65,8 +75,7 @@ func resourceLibvirtNetworkUpdate(d *schema.ResourceData, meta interface{}) erro
 		// The input XML will need to be modified to contain the current UUID
 		// Otherwise it will fail with network already exists
 		schema := libvirtxml.Network{}
-		err := schema.Unmarshal(d.Get("xml").(string))
-		if err != nil {
+		if err := schema.Unmarshal(d.Get("xml").(string)); err != nil {
 			return fmt.Errorf("Failed to unmarshal XML: %s", err)
 		}
 		schema.UUID =  d.Id()
